@@ -27,6 +27,10 @@ ACのプレイレーンの左端から右端のpixel: 25~168
 REMI-Sのプレイレーンの左端から右端のpixel: 47~334
 ```
 
+- リンク
+ - [詳しい](http://verflucht.blog.fc2.com/blog-entry-2.html)
+ - [ここもふむふむなるほどってなる](http://taisa-llma.hatenablog.com/entry/2016/12/10/025953)
+
 ## 実行結果
 
 ```txt
