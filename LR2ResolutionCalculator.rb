@@ -32,7 +32,7 @@ class Monitor
 
     # 1pxあたりのmmを出す
     @mm[:widthPerPixel] = @mm[:width]/@px[:x]
-    @mm[:heightPerPixel] = @mm[:height]/@px[:x]
+    @mm[:heightPerPixel] = @mm[:height]/@px[:y]
   end
 
   def pythagorasTheorem(ratioString, d)
@@ -106,20 +106,22 @@ end
 
 # 何の解像度向けに作られたフレームで、フレーム内外のサイズは何pxなのか？
 class IIDXFrame
-  def initialize(frameLength, size)
+  def initialize(frame, size)
     # フレーム内の解像度
     @frame = {
-      :frame_length => 0.0.to_f,
+      :frame_width => 0.0.to_f,
+      :frame_height => 0.0.to_f,
       :frame_other  => 0.0.to_f,
       :width        => size[0],
       :height       => size[1]
     }
 
     # frameのpxを出しておく
-    @frame[:frame_length] = (frameLength[1]-frameLength[0]).to_f
+    @frame[:frame_width] = frame[0].to_f
+    @frame[:frame_height] = frame[1].to_f
 
     # frame以外のpxも出しておく
-    @frame[:frame_other] = (@frame[:width] - @frame[:frame_length]).to_f
+    @frame[:frame_other] = (@frame[:width] - @frame[:frame_width]).to_f
   end
 
   def getFrame()
@@ -134,49 +136,101 @@ end
 # サービス
 class LR2ResolutionCalculator
   def initialize()
+    # コレクション
+    initializeMonitorAndFrames()
+    # LR2のウィンドウサイズをいくつにしたらACのフレーム幅再現できるか計算
+    # getLR2WindowSizeForSimulateACWidthSize(@acMonitor,@cindyMonitor,@iidxSdFrame,@bigPlaySdFrame)
+    # getLR2WindowSizeForSimulateACWidthSize(@acMonitor,@cindyMonitor,@iidxSdFrame,@ninePlusSdFrame)
+    # IIDXの白数字いくつにすれば、自宅のLR2の縦幅を再現できるか計算
+    getIIDXWhiteNumberFromLR2FrameAndWindowSize(@acMonitor,@cindyMonitor,@iidxSdFrame,@ninePlusSdFrame)
+  end
+
+  def initializeMonitorAndFrames()
+    @acMonitor        = Monitor.new(37,"16:9",[640,480])
+    @acHdMonitor      = Monitor.new(37,"16:9",[1280,720])
+    @cindyMonitor     = Monitor.new(31.5,"16:9",[3840,2160])
+    @iidxSdFrame      = IIDXFrame.new([144,320],[640,480])
+    @iidxCsSdFrame    = IIDXFrame.new([234,320],[640,480])
+    @iidxHdFrame      = IIDXFrame.new([288,480],[1280,720])
+    @bigPlaySdFrame   = IIDXFrame.new([288,427],[640,480])
+    @ninePlusSdFrame  = IIDXFrame.new([234,320],[640,480])
+    @wMixHdFrame      = IIDXFrame.new([234,320],[1280,720])
+  end
+
+  def getIIDXWhiteNumberFromLR2FrameAndWindowSize(acMonitor, userMonitor, iidxFrame, userFrame)
+    # 1. IIDXのフレームy分のmmを測る
+    acSdHeight = acMonitor.getMm[:heightPerPixel]*iidxFrame.getFrame[:frame_height]
+    p "IIDXフレームの高さ: #{acSdHeight} mm"
+    # 2. 白数字1つあたりの高さ(mm)を求める
+    heightPerWhiteNumber = acSdHeight/999
+    p "IIDXフレームの白数字1つあたりの高さ: #{heightPerWhiteNumber} mm"
+
+    # 3. LR2の好きなフレームの高さを測る
+    # まずは先に倍率を求めておく
+    finalAmp = getLR2WindowSizeForSimulateACWidthSize(acMonitor,userMonitor,iidxFrame,userFrame)
+    # bmsFrameにfinalAmpをかけた高さをcindyMonitorで表示したときのmmを測る
+    bmsFrameHeightOnUserMonitor = (userFrame.getFrame[:frame_height]*finalAmp)*userMonitor.getMm[:heightPerPixel]
+    p "ACと同じ横幅になるように調整した時のBMSフレームの高さ: #{bmsFrameHeightOnUserMonitor} mm"
+
+    # 4. iidxの高さとの差分を測る
+    sabunHeight = (acSdHeight - bmsFrameHeightOnUserMonitor)
+    p "IIDXACとBMSフレームの高さ差分: #{sabunHeight} mm"
+    whiteNumberForFillSabun = sabunHeight/heightPerWhiteNumber
+    p "IIXDACとBMSフレームの高さ差分を埋めるための白数字: #{whiteNumberForFillSabun}"
+
+    # 5. BMSのシャッターの白数字換算を数える
+    # p "シャッターが10分割の場合の高さ: #{bmsFrameHeightOnUserMonitor/10} mm"
+    # p "シャッターが20分割の場合の高さ: #{bmsFrameHeightOnUserMonitor/20} mm"
+    # p "シャッターが10分割の場合の高さを白数字換算: #{(bmsFrameHeightOnUserMonitor/10)/heightPerWhiteNumber}"
+    # p "シャッターが20分割の場合の高さを白数字換算: #{(bmsFrameHeightOnUserMonitor/20)/heightPerWhiteNumber}"
+    p "シャッターを1/10降ろした場合の高さを白数字換算: #{(((bmsFrameHeightOnUserMonitor/10)*1)/heightPerWhiteNumber)+whiteNumberForFillSabun}"
+    p "シャッターを3/20降ろした場合の高さを白数字換算: #{(((bmsFrameHeightOnUserMonitor/20)*3)/heightPerWhiteNumber)+whiteNumberForFillSabun}"
+  end
+
+  def getLR2WindowSizeForSimulateACWidthSize(acMonitor,userMonitor,acFrame,userFrame)
     # [モニタ] インチ数、アスペクト比[横:縦]、内部解像度[width,height]はそれぞれ導出不可能な値なので、与える
     # AC IIDXのモニタ
-    acMonitor = Monitor.new(37,"16:9",[640,480])
+    acMonitor = acMonitor
     # p "IIDX Monitor"
     # acMonitor.showMe()
     # p ""
     # 家のモニタ
-    cindyMonitor = Monitor.new(31.5,"16:9",[3840,2160])
+    userMonitor = userMonitor
     # p "Cindy Monitor"
-    # cindyMonitor.showMe()
+    # userMonitor.showMe()
     # p ""
 
     # [フレーム] フレーム幅[始まり~終わり]、全体解像度[width,height]はそれぞれ導出不可能な値なので、与える
     # フレーム幅
-    realFrame = IIDXFrame.new([25,168],[640,480])
+    acFrame = acFrame
     # p "AC Style Frame"
-    # realFrame.showMe
+    # acFrame.showMe
     # p ""
-    remiFrame = IIDXFrame.new([47,334],[640,480])
-    # p "REMI-S Style Frame"
-    # remiFrame.showMe
+    userFrame = userFrame
+    # p "BMS Style Frame"
+    # userFrame.showMe
     # p ""
 
-    # acMonitorでrealFrameを表示した時の幅を、
-    # cindyMonitorでremiFrameを使った時に再現するには、
+    # acMonitorでacFrameを表示した時の幅を、
+    # userMonitorでuserFrameを使った時に再現するには、
     # LR2設定でを何Pixelに設定すればいいのか？
 
-    # acMonitorでrealFrameをフルスクリーン表示した時の幅(mm)
-    realWidthOnAcMonitor = acMonitor.getMm()[:widthPerPixel] * realFrame.getFrame()[:frame_length]
-    p "acMonitor(640x480@37inch)でrealFrame(640x480)を表示した時のフレーム幅(mm): #{realWidthOnAcMonitor}"
-    # cindyMonitorでremiFrameを表示した時の長さ
-    remiWidthOnCindyMonitor = cindyMonitor.getMm()[:widthPerPixel] * remiFrame.getFrame()[:frame_length]
-    p "cindyMonitor(3840x2160@31.5inch)でremiFrame(640x480)を表示した時のフレーム幅(mm): #{remiWidthOnCindyMonitor}"
-    # cindyMonitorでremiFrameを表示した時の長さ * x = realWidthOnAcMonitor となるようなxを探る
-    finalAmp = realWidthOnAcMonitor / remiWidthOnCindyMonitor
-    p " -> 自分ちのモニタでREMI-Sを使った時にAC版のフレームサイズ(mm)を再現するには、LR2の解像度を#{finalAmp}倍すればいい"
+    # acMonitorでacFrameをフルスクリーン表示した時の幅(mm)
+    acWidthOnAcMonitor = acMonitor.getMm()[:widthPerPixel] * acFrame.getFrame()[:frame_width]
+    p "acMonitor(640x480@37inch)でacFrame(640x480)を表示した時のフレーム幅(mm): #{acWidthOnAcMonitor}"
+    # userMonitorでuserFrameを表示した時の長さ
+    bmsWidthOnUserMonitor = userMonitor.getMm()[:widthPerPixel] * userFrame.getFrame()[:frame_width]
+    p "userMonitor(3840x2160@31.5inch)でuserFrame(640x480)を表示した時のフレーム幅(mm): #{bmsWidthOnUserMonitor}"
+    # userMonitorでuserFrameを表示した時の長さ * x = acWidthOnAcMonitor となるようなxを探る
+    finalAmp = acWidthOnAcMonitor / bmsWidthOnUserMonitor
+    p " -> 自分ちのモニタでBMSフレームを使った時にAC版のフレームサイズ(mm)を再現するには、LR2の解像度を#{finalAmp}倍すればいい"
     # 実際に何ピクセルなのか表示
-    p " -> LR2の解像度 xy = #{(remiFrame.getFrame[:width]*finalAmp).round},#{(remiFrame.getFrame[:height]*finalAmp).round} にすればREMI-SでACを再現できる。"
+    p " -> LR2の解像度 xy = #{(userFrame.getFrame[:width]*finalAmp).round},#{(userFrame.getFrame[:height]*finalAmp).round} にすればBMSフレームでACを再現できる。"
 
     # # 検算する
-    # p "[検算]: 自分ちのモニタの1pxあたりのサイズ(mm) * REMI-Sのフレームサイズ(px) * x = ACのモニタのフレーム幅(mm)"
-    # # p "[計算]: #{cindyMonitor.getPx()[:widthPerPixel]} * #{remiFrame.getFrame()[:frame_length]} = #{cindyMonitor.getPx()[:widthPerPixel] * remiFrame.getFrame()[:frame_length]} == #{acMonitor.getMm()[:widthPerPixel]*realFrame.getFrame()[:frame_length]}"
-    # p "[計算]: #{cindyMonitor.getMm()[:widthPerPixel]} * #{remiFrame.getFrame()[:frame_length]} * #{finalAmp} = #{cindyMonitor.getMm()[:widthPerPixel] * remiFrame.getFrame()[:frame_length] * finalAmp} == #{acMonitor.getMm()[:widthPerPixel]*realFrame.getFrame()[:frame_length]}"
+    # p "[検算]: 自分ちのモニタの1pxあたりのサイズ(mm) * BMSフレームのフレームサイズ(px) * x = ACのモニタのフレーム幅(mm)"
+    # # p "[計算]: #{userMonitor.getPx()[:widthPerPixel]} * #{userFrame.getFrame()[:frame_width]} = #{userMonitor.getPx()[:widthPerPixel] * userFrame.getFrame()[:frame_width]} == #{acMonitor.getMm()[:widthPerPixel]*acFrame.getFrame()[:frame_width]}"
+    # p "[計算]: #{userMonitor.getMm()[:widthPerPixel]} * #{userFrame.getFrame()[:frame_width]} * #{finalAmp} = #{userMonitor.getMm()[:widthPerPixel] * userFrame.getFrame()[:frame_width] * finalAmp} == #{acMonitor.getMm()[:widthPerPixel]*acFrame.getFrame()[:frame_width]}"
     # p ""
 
     # [フレーム幅(mm)が正しそうなことの検算]
@@ -188,9 +242,10 @@ class LR2ResolutionCalculator
     # 全体(導出) = 183.01915099987522 + 636.087538789776201 = 819.106689789651421
 
     # [倍率が正しそうなことの検算]
-    # REMI-SをCindyMonitorで表示した時の幅 = 52.11946810982082 mm
+    # BMSフレームをuserMonitorで表示した時の幅 = 52.11946810982082 mm
     # 183.01915099987522 / 52.11946810982082 = 3.511531441845031
 
+    return finalAmp
   end
 end
 LR2ResolutionCalculator.new()
