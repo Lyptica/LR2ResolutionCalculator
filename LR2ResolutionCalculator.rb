@@ -26,7 +26,7 @@ class Monitor
     oneInchDMm = 25.4
     thisInch = @mm[:inch]
     thisInchDMm = oneInchDMm * thisInch
-    
+
     # モニタは直角三角形なので、三平方の定理を使って縦横を出す
     @mm[:width],@mm[:height] = pythagorasTheorem(@mm[:ratioString], thisInchDMm)
 
