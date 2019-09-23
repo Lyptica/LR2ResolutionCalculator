@@ -2,9 +2,10 @@ require 'pp'
 
 # 何の解像度で作られたモニタで、実際のmmはいくらなのか、1ピクセルあたりのmmはいくらか？
 class Monitor
-  def initialize(inch, ratioString, xy)
+  def initialize(name, inch, ratioString, xy)
     # mmの世界
     @mm = {
+      :name           => name,
       :inch           => inch.to_f,
       :width          => 0.to_f,
       :height         => 0.to_f,
@@ -95,6 +96,16 @@ class Monitor
     pp @px
   end
 
+  def printAll()
+    print "モニタ名: #{@mm[:name]}\n"
+    print " -> #{@mm[:inch]} (インチ)\n"
+    print " -> #{@mm[:ratioString]} (アスペクト比)\n"
+    print " -> #{@px[:x].floor}x#{@px[:y].floor} (pixel)\n"
+    print " -> #{@mm[:width].floor}x#{@mm[:height].floor} (mm)\n"
+    print " -> #{@mm[:widthPerPixel].floor(2)}x#{@mm[:heightPerPixel].floor(2)} (mm/pixel)\n"
+    # print " -> #{@mm[:]}\n"
+  end
+
   def getPx()
     return @px
   end
@@ -106,14 +117,17 @@ end
 
 # 何の解像度向けに作られたフレームで、フレーム内外のサイズは何pxなのか？
 class IIDXFrame
-  def initialize(frame, size)
+  def initialize(name, frame, size, hs, lanecover)
     # フレーム内の解像度
     @frame = {
+      :name        => name,
       :frame_width => 0.0.to_f,
       :frame_height => 0.0.to_f,
       :frame_other  => 0.0.to_f,
-      :width        => size[0],
-      :height       => size[1]
+      :width        => size[0].to_f,
+      :height       => size[1].to_f,
+      :high_speed   => hs.to_f,
+      :lanecover    => lanecover.to_f
     }
 
     # frameのpxを出しておく
@@ -131,6 +145,14 @@ class IIDXFrame
   def showMe()
     pp @frame
   end
+
+  def printAll()
+    print "フレーム名: #{@frame[:name]}\n"
+    print " -> #{@frame[:width].floor}x#{@frame[:height].floor} (フレーム全体の解像度)(pixel)\n"
+    print " -> #{@frame[:frame_width].floor}x#{@frame[:frame_height].floor} (ノートレーンのみの解像度)(pixel)\n"
+    print " -> #{@frame[:high_speed]} (ハイスピード)(BMSフレームのみ)\n" if @frame[:high_speed] != 0.0
+    print " -> #{@frame[:lanecover]} (レーンカバー)(BMSフレームのみ)\n" if @frame[:lanecover] != 0.0
+  end
 end
 
 # サービス
@@ -139,93 +161,97 @@ class LR2ResolutionCalculator
     # コレクション
     initializeMonitorAndFrames()
     # LR2のウィンドウサイズをいくつにしたらACのフレーム幅再現できるか計算
-    # getLR2WindowSizeForSimulateACWidthSize(@acMonitor,@cindyMonitor,@iidxSdFrame,@bigPlaySdFrame)
-    # getLR2WindowSizeForSimulateACWidthSize(@acMonitor,@cindyMonitor,@iidxSdFrame,@ninePlusSdFrame)
     # IIDXの白数字いくつにすれば、自宅のLR2の縦幅を再現できるか計算
-    getIIDXWhiteNumberFromLR2FrameAndWindowSize(@acMonitor,@cindyMonitor,@iidxSdFrame,@ninePlusSdFrame)
+    getAllInfo(@acOrg40v30Monitor,@cindyMonitor,@iidxHdFrame,@wMixHdFrame)
+    getAllInfo(@acOrg40v30Monitor,@cindyMonitor,@iidxHdFrame,@ninePlusSdFrame)
   end
 
   def initializeMonitorAndFrames()
-    @acMonitor        = Monitor.new(37,"16:9",[640,480])
-    @acHdMonitor      = Monitor.new(37,"16:9",[1280,720])
-    @cindyMonitor     = Monitor.new(31.5,"16:9",[3840,2160])
-    @iidxSdFrame      = IIDXFrame.new([144,320],[640,480])
-    @iidxCsSdFrame    = IIDXFrame.new([234,320],[640,480])
-    @iidxHdFrame      = IIDXFrame.new([288,480],[1280,720])
-    @bigPlaySdFrame   = IIDXFrame.new([288,427],[640,480])
-    @ninePlusSdFrame  = IIDXFrame.new([234,320],[640,480])
-    @wMixHdFrame      = IIDXFrame.new([234,320],[1280,720])
+    #                                    name,                    inch,aspect,resolution
+    @acMonitor             = Monitor.new("acMonitor",             37,  "16:9",[640,480])
+    @acOrg40v30Monitor     = Monitor.new("acOrg40v30Monitor",     40,  "16:9",[1280,720])
+    @acOrg40v30JustMonitor = Monitor.new("acOrg40v30JustMonitor", 39.8,"16:9",[1280,720])
+    @acHdMonitor           = Monitor.new("acHdMonitor",           37,  "16:9",[1280,720])
+    @cindyMonitor          = Monitor.new("cindyMonitor",          31.5,"16:9",[3840,2160])
+    #                                      name,              mmAspect, resolution, HS, LANECOVER
+    @iidxSdFrame           = IIDXFrame.new("iidxSdFrame",     [143,320],[640,480],  0,  0)
+    @iidxCsSdFrame         = IIDXFrame.new("iidxCsSdFrame",   [191,320],[640,480],  0,  0)
+    @iidxHdFrame           = IIDXFrame.new("iidxHdFrame",     [287,481],[1280,720], 0,  0)
+    @bigPlaySdFrame        = IIDXFrame.new("bigPlaySdFrame",  [287,426],[640,480],  0,  0)
+    @ninePlusSdFrame       = IIDXFrame.new("ninePlusSdFrame", [232,322],[640,480],  220,15)
+    @wMixHdFrame           = IIDXFrame.new("wMixHdFrame",     [376,481],[1280,720], 350,10)
   end
 
-  def getIIDXWhiteNumberFromLR2FrameAndWindowSize(acMonitor, userMonitor, iidxFrame, userFrame)
-    # 1. IIDXのフレームy分のmmを測る
-    acSdHeight = acMonitor.getMm[:heightPerPixel]*iidxFrame.getFrame[:frame_height]
-    p "IIDXフレームの高さ: #{acSdHeight} mm"
-    # 2. 白数字1つあたりの高さ(mm)を求める
-    heightPerWhiteNumber = acSdHeight/999
-    p "IIDXフレームの白数字1つあたりの高さ: #{heightPerWhiteNumber} mm"
+  def getAllInfo(acMonitor, userMonitor, iidxFrame, userFrame)
+    print "==========================================\n"
 
-    # 3. LR2の好きなフレームの高さを測る
-    # まずは先に倍率を求めておく
+    # インプット情報表示
+
+    # AC IIDXのモニタ
+    # acMonitor.showMe
+    acMonitor.printAll
+
+    # 家のモニタ
+    # userMonitor.showMe
+    userMonitor.printAll
+
+    # ACフレーム
+    # iidxFrame.showMe
+    iidxFrame.printAll
+
+    # BMSフレーム
+    # userFrame.showMe
+    userFrame.printAll
+
+    # ウィンドウサイズ算出
     finalAmp = getLR2WindowSizeForSimulateACWidthSize(acMonitor,userMonitor,iidxFrame,userFrame)
-    # bmsFrameにfinalAmpをかけた高さをcindyMonitorで表示したときのmmを測る
-    bmsFrameHeightOnUserMonitor = (userFrame.getFrame[:frame_height]*finalAmp)*userMonitor.getMm[:heightPerPixel]
-    p "ACと同じ横幅になるように調整した時のBMSフレームの高さ: #{bmsFrameHeightOnUserMonitor} mm"
 
-    # 4. iidxの高さとの差分を測る
-    sabunHeight = (acSdHeight - bmsFrameHeightOnUserMonitor)
-    p "IIDXACとBMSフレームの高さ差分: #{sabunHeight} mm"
-    whiteNumberForFillSabun = sabunHeight/heightPerWhiteNumber
-    p "IIXDACとBMSフレームの高さ差分を埋めるための白数字: #{whiteNumberForFillSabun}"
+    # 白数字算出
+    getIIDXWhiteNumberFromLR2FrameAndWindowSize(finalAmp, acMonitor, userMonitor, iidxFrame, userFrame)
 
-    # 5. BMSのシャッターの白数字換算を数える
-    # p "シャッターが10分割の場合の高さ: #{bmsFrameHeightOnUserMonitor/10} mm"
-    # p "シャッターが20分割の場合の高さ: #{bmsFrameHeightOnUserMonitor/20} mm"
-    # p "シャッターが10分割の場合の高さを白数字換算: #{(bmsFrameHeightOnUserMonitor/10)/heightPerWhiteNumber}"
-    # p "シャッターが20分割の場合の高さを白数字換算: #{(bmsFrameHeightOnUserMonitor/20)/heightPerWhiteNumber}"
-    p "シャッターを1/10降ろした場合の高さを白数字換算: #{(((bmsFrameHeightOnUserMonitor/10)*1)/heightPerWhiteNumber)+whiteNumberForFillSabun}"
-    p "シャッターを3/20降ろした場合の高さを白数字換算: #{(((bmsFrameHeightOnUserMonitor/20)*3)/heightPerWhiteNumber)+whiteNumberForFillSabun}"
+    # LR2で設定しているハイスピード設定をACで再現するためには、緑数字をいくらにしたらいいのか計算
+
+    print "⭐#{userFrame.getFrame[:name]}のハイスピード:#{userFrame.getFrame[:high_speed]}, シャッター:#{userFrame.getFrame[:lanecover]}を緑数字に換算⭐\n"
+    # skinの設定
+    dstLineYH=userFrame.getFrame[:frame_height]
+    # デフォルトのスピード
+    lr2ScrollSpeed=100.0
+    # LR2のレーンカバーの数字
+    laneCover=userFrame.getFrame[:lanecover]
+    # いつものLR2のハイスピ設定
+    lr2HighSpeed=userFrame.getFrame[:high_speed]
+    lr2ToIIDX(lr2HighSpeed,dstLineYH,lr2ScrollSpeed,laneCover)
+    print "\n"
+
+    # # IIDXの緑数字
+    # greenNumber=350
+    # iidxToLR2(greenNumber,dstLineY,lr2ScrollSpeed,laneCover)
+
   end
 
   def getLR2WindowSizeForSimulateACWidthSize(acMonitor,userMonitor,acFrame,userFrame)
     # [モニタ] インチ数、アスペクト比[横:縦]、内部解像度[width,height]はそれぞれ導出不可能な値なので、与える
-    # AC IIDXのモニタ
-    acMonitor = acMonitor
-    # p "IIDX Monitor"
-    # acMonitor.showMe()
-    # p ""
-    # 家のモニタ
-    userMonitor = userMonitor
-    # p "Cindy Monitor"
-    # userMonitor.showMe()
-    # p ""
-
-    # [フレーム] フレーム幅[始まり~終わり]、全体解像度[width,height]はそれぞれ導出不可能な値なので、与える
-    # フレーム幅
-    acFrame = acFrame
-    # p "AC Style Frame"
-    # acFrame.showMe
-    # p ""
-    userFrame = userFrame
-    # p "BMS Style Frame"
-    # userFrame.showMe
-    # p ""
 
     # acMonitorでacFrameを表示した時の幅を、
     # userMonitorでuserFrameを使った時に再現するには、
     # LR2設定でを何Pixelに設定すればいいのか？
 
+    print "\n"
+    print "⭐ACフレームの横幅をBMSで再現⭐\n"
     # acMonitorでacFrameをフルスクリーン表示した時の幅(mm)
     acWidthOnAcMonitor = acMonitor.getMm()[:widthPerPixel] * acFrame.getFrame()[:frame_width]
-    p "acMonitor(640x480@37inch)でacFrame(640x480)を表示した時のフレーム幅(mm): #{acWidthOnAcMonitor}"
+    # print "#{acMonitor.getMm[:name]}(#{acMonitor.getPx[:x]}x#{acMonitor.getPx[:y]}@#{acMonitor.getMm[:inch]}inch)で#{acFrame.getFrame[:name]}(#{acFrame.getFrame[:width]}x#{acFrame.getFrame[:height]})を表示した時のフレーム幅(mm): #{acWidthOnAcMonitor}\n"
+    print " -> #{acMonitor.getMm[:name]}で#{acFrame.getFrame[:name]}を表示した時のフレーム幅(mm): #{acWidthOnAcMonitor.floor(2)}\n"
     # userMonitorでuserFrameを表示した時の長さ
     bmsWidthOnUserMonitor = userMonitor.getMm()[:widthPerPixel] * userFrame.getFrame()[:frame_width]
-    p "userMonitor(3840x2160@31.5inch)でuserFrame(640x480)を表示した時のフレーム幅(mm): #{bmsWidthOnUserMonitor}"
+    # print "#{userMonitor.getMm[:name]}(#{userMonitor.getPx[:x]}x#{userMonitor.getPx[:y]}@#{userMonitor.getMm[:inch]}inch)で#{userFrame.getFrame[:name]}(#{userFrame.getFrame[:width]}x#{userFrame.getFrame[:height]})を表示した時のフレーム幅(mm): #{bmsWidthOnUserMonitor}\n"
+    print " -> #{userMonitor.getMm[:name]}で#{userFrame.getFrame[:name]}を表示した時のフレーム幅(mm): #{bmsWidthOnUserMonitor.floor(2)}\n"
     # userMonitorでuserFrameを表示した時の長さ * x = acWidthOnAcMonitor となるようなxを探る
     finalAmp = acWidthOnAcMonitor / bmsWidthOnUserMonitor
-    p " -> 自分ちのモニタでBMSフレームを使った時にAC版のフレームサイズ(mm)を再現するには、LR2の解像度を#{finalAmp}倍すればいい"
+    print "   -> #{userMonitor.getMm[:name]}で#{userFrame.getFrame[:name]}を使った時に#{acFrame.getFrame[:name]}のフレーム横幅を再現するには、LR2の解像度を#{finalAmp.floor(2)}倍すればいい\n"
     # 実際に何ピクセルなのか表示
-    p " -> LR2の解像度 xy = #{(userFrame.getFrame[:width]*finalAmp).round},#{(userFrame.getFrame[:height]*finalAmp).round} にすればBMSフレームでACを再現できる。"
+    print "   -> ✅LR2のウィンドウサイズ = #{(userFrame.getFrame[:width]*finalAmp).round}x#{(userFrame.getFrame[:height]*finalAmp).round} にすれば#{userFrame.getFrame[:name]}で#{acFrame.getFrame[:name]}のフレーム横幅を再現できる。\n"
+    print "\n"
 
     # # 検算する
     # p "[検算]: 自分ちのモニタの1pxあたりのサイズ(mm) * BMSフレームのフレームサイズ(px) * x = ACのモニタのフレーム幅(mm)"
@@ -247,5 +273,51 @@ class LR2ResolutionCalculator
 
     return finalAmp
   end
+
+  def getIIDXWhiteNumberFromLR2FrameAndWindowSize(finalAmp, acMonitor, userMonitor, iidxFrame, userFrame)
+    print "⭐#{finalAmp.floor(2)}倍に大きくした#{userFrame.getFrame[:name]}の縦幅を#{iidxFrame.getFrame[:name]}で再現するための白数字の算出⭐\n"
+
+    # 1. IIDXのフレームy分のmmを測る
+    print " -> #{iidxFrame.getFrame[:name]}周り\n"
+    acSdHeight = acMonitor.getMm[:heightPerPixel]*iidxFrame.getFrame[:frame_height]
+    print "   -> #{iidxFrame.getFrame[:name]}のレーンの高さ: #{acSdHeight.floor(2)} mm\n"
+    # 2. 白数字1つあたりの高さ(mm)を求める
+    heightPerWhiteNumber = acSdHeight/999
+    print "   -> #{iidxFrame.getFrame[:name]}の白数字1つあたりの高さ: #{heightPerWhiteNumber.floor(2)} mm\n"
+
+    # 3. LR2の好きなフレームの高さを測る
+    print " -> #{userFrame.getFrame[:name]}周り\n"
+    # bmsFrameにfinalAmpをかけた高さをcindyMonitorで表示したときのmmを測る
+    bmsFrameHeightOnUserMonitor = (userFrame.getFrame[:frame_height]*finalAmp)*userMonitor.getMm[:heightPerPixel]
+    print "   -> #{finalAmp.floor(2)}倍に大きくした#{userFrame.getFrame[:name]}のレーンの高さ: #{bmsFrameHeightOnUserMonitor.floor(2)} mm\n"
+
+    # 4. iidxの高さとの差分を測る
+    print " -> 差分を測る\n"
+    sabunHeight = (acSdHeight - bmsFrameHeightOnUserMonitor)
+    print "   -> #{iidxFrame.getFrame[:name]}と#{userFrame.getFrame[:name]}の高さ差分: #{sabunHeight.floor(2)} mm\n"
+    whiteNumberForFillSabun = sabunHeight/heightPerWhiteNumber
+    print "   -> ✅#{iidxFrame.getFrame[:name]}と#{userFrame.getFrame[:name]}の高さ差分を埋めるための白数字: #{whiteNumberForFillSabun.floor}\n"
+
+    # 5. BMSのシャッターの白数字換算を数える
+    print " -> シャッターを考慮した場合の白数字を計算\n"
+    # print "シャッターが10分割の場合の高さ: #{bmsFrameHeightOnUserMonitor/10} mm\n"
+    # print "シャッターが20分割の場合の高さ: #{bmsFrameHeightOnUserMonitor/20} mm\n"
+    # print "シャッターが10分割の場合の高さを白数字換算: #{(bmsFrameHeightOnUserMonitor/10)/heightPerWhiteNumber}\n"
+    # print "シャッターが20分割の場合の高さを白数字換算: #{(bmsFrameHeightOnUserMonitor/20)/heightPerWhiteNumber}\n"
+    print "   -> ✅更にシャッターを#{userFrame.getFrame[:lanecover].floor}/100降ろした場合の高さを白数字換算: #{((((bmsFrameHeightOnUserMonitor/100)*userFrame.getFrame[:lanecover])/heightPerWhiteNumber)+whiteNumberForFillSabun).floor}\n"
+    print "\n"
+  end
+
+  def lr2ToIIDX(lr2HighSpeed,dstLineYH,lr2ScrollSpeed,laneCover)
+    chip1=(2173*10.0*10.0*10.0*10.0)/725
+    # p chip1
+    chip2=((dstLineYH)/(lr2HighSpeed*lr2ScrollSpeed))*(1.0-(laneCover/100.0))
+    # p chip2
+    g=chip1*chip2
+    print " -> HS: #{lr2HighSpeed}\n"
+    print " -> シャッター: #{laneCover} (%)\n"
+    print "   -> ✅算出される緑数字: #{g.floor}\n"
+  end
+
 end
 LR2ResolutionCalculator.new()
